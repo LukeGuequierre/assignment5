@@ -32,7 +32,6 @@ import googleapiclient.discovery
 CLIENT_SECRETS_FILE = "google_oauth_client_secret.json"
 
 
-
 # This OAuth 2.0 access scope allows for full read/write access to the
 # authenticated user's account and requires requests to use an SSL connection.
 SCOPES = ['https://www.googleapis.com/auth/userinfo.email']
@@ -112,8 +111,7 @@ class Admin(Base):
     def __repr__(self):
         return "<Admin(name='%s')>" % (self.name)
 
-    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
-    # 1. Assignment 5: Modify the method to not return password in the returned fields
+    # 1. Assignment 5: Do not return password in the returned fields
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
@@ -131,8 +129,7 @@ class User(Base):
     def __repr__(self):
         return "<User(name='%s')>" % (self.name)
 
-    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
-    # 2. Assignment 5: Modify the method to not return password in the returned fields
+    # 2. Assignment 5: Do not return password in the returned fields
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
@@ -152,7 +149,6 @@ class City(Base):
     def __repr__(self):
         return "<City(name='%s')>" % (self.name)
 
-    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
@@ -172,7 +168,6 @@ class UserCity(Base):
     def __repr__(self):
         return "<UserCity(cityId='%d' userId='%d')>" % (self.cityId, self.userId)
 
-    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
@@ -190,7 +185,6 @@ class WeatherParameter(Base):
     def __repr__(self):
         return "<WeatherParameter(name='%s')>" % (self.name)
 
-    # Ref: https://stackoverflow.com/questions/5022066/how-to-serialize-sqlalchemy-result-to-json
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
@@ -219,7 +213,10 @@ class ETL():
             city_name = city.name
             city_url = city.url
             r = requests.get(city_url)
-            # 1. Assignment 4 TODO: Check if the city has data available by checking for return code 404
+            # Assignment 4: Skip cities with no data (404)
+            if r.status_code == 404:
+                app.logger.info("Data not available (404) for city: " + city_name)
+                continue
             city_data = r.text
             data_dir = os.getcwd() + "/data"
             os.system("mkdir -p " + data_dir)
@@ -234,13 +231,10 @@ class ETL():
             fp = open(fPath,"r")
             lines = fp.readlines()
             param_values = {}
-            #for l in range(0, len(lines)-2, 2):
             for l in range(0, len(lines)):
                 if l+1 > len(lines):
                     break
-                #line = lines[l] + lines[l+1]
                 line = lines[l]
-                #print(line)
                 parts = line.split(" ")
                 year_month_param = parts[0]
                 rest = year_month_param[11:]
@@ -248,7 +242,6 @@ class ETL():
                 month = rest[4:6]
                 param = rest[6:]
                 if param in weather_parameters_to_track:
-                    #print(year + " " + month + " " + param)
                     values1 = []
                     values = []
                     for i in range(len(parts)):
@@ -260,7 +253,6 @@ class ETL():
                     for j in range(0, len(values1), 2):
                         values.append(values1[j])
                     param_values[year+"-"+month+"-"+param] = values
-            #print(param_values)
             for key, val in param_values.items():
                 valString = ','.join(val)
                 city = dbsession.query(City).filter_by(name=filename).first()
@@ -290,12 +282,12 @@ def get_user_info(credentials):
     user_info = None
     try:
         user_info = user_info_service.userinfo().get().execute()
-    except errors.HttpError as e:
-        logging.error('An error occurred: %s', e)
+    except Exception as e:
+        app.logger.error('An error occurred: %s', e)
     if user_info and user_info.get('id'):
         return user_info
     else:
-        raise NoUserIdException()
+        raise Exception('No user id found')
 
 
 def credentials_to_dict(credentials):
@@ -318,7 +310,6 @@ def add_admin():
     name = data['name']
     password = data['password']
 
-
     session = DBSession()
     admin = session.query(Admin).filter_by(name=name).first()
 
@@ -326,8 +317,9 @@ def add_admin():
         status = ("Admin with name {name} already exists.\n").format(name=name)
         return Response(status, status=400)
     else:
-        # 3. Assignment 5: Use bcrypt to encrypt the password.
-        admin = Admin(name=name, password=password)
+        # 3. Assignment 5: Encrypt password with bcrypt before storing
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        admin = Admin(name=name, password=hashed.decode('utf-8'))
         session.add(admin)
         session.commit()
 
@@ -392,15 +384,15 @@ def add_user():
     name = data['name']
     password = data['password']
 
-    # 4. Assignment 5: Use bcrypt to encrypt the password.
-    newuser = User(name=name, password=password)
+    # 4. Assignment 5: Encrypt password with bcrypt before storing
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    newuser = User(name=name, password=hashed.decode('utf-8'))
 
     session = DBSession()
     user = session.query(User).filter_by(name=name).first()
     if user == None:
         session.add(newuser)
         session.commit()
-
         return newuser.as_dict()
     else:
         status = ("User with name {name} already exists.\n").format(name=name)
@@ -472,7 +464,6 @@ def add_city(admin_id):
     else:
         city = City(name=name, url=url, adminId=admin.id)
 
-        # 2. Assignment 4: Check if City with name already exists; Don't add if it already exists
         existing_city = session.query(City).filter_by(name=name).first()
         if existing_city != None:
             status = ("City with name {name} already exists.\n").format(name=name)
@@ -605,7 +596,7 @@ def get_admin_cities(dbsession):
         city = {}
         city['name'] = cty.name
         cities.append(city)
-    return cities 
+    return cities
 
 
 @app.route("/status", methods=['GET'])
@@ -640,13 +631,10 @@ def city_status():
     return json.dumps(op)
 
 
-## 3. Assignment 4 
-## Expected Output:
-### {'2023-08-TMAX': '411,406,400,406,411,406,411,411,422,417,422,411,411,411,389,400,433,411,400,417,-9999,-9999,-9999', '2023-08-TMIN': '256,261,256,261,256,256,256,256,250,256,261,267,261,250,267,228,250,250,239,256,-9999,-9999,-9999', '2023-08-PRCP': '-9999,-9999,-9999'}
 @app.route("/weather_params", methods=['GET'])
 def city_status_graph():
     op = {}
-    app.logger.info("Inside city_status")
+    app.logger.info("Inside city_status_graph")
     city_name = request.args.get('city').strip()
     app.logger.info("City status:" + city_name)
     
@@ -695,6 +683,8 @@ def addcity():
     if 'username' in session:
         username = session['username']
 
+    dbsession = DBSession()
+    admin_cities = get_admin_cities(dbsession)
     user_cities = in_mem_cities
     return render_template('welcome.html',
             welcome_message = "Personal Weather Portal - Admin Panel",
@@ -716,7 +706,7 @@ def registercity():
     year = request.args.get('year').strip()
     month = request.args.get('month').strip()
 
-    user_weather_params = [] #weather_parameters_to_track = ['TMAX','TMIN','PRCP','SNOW']
+    user_weather_params = []
     if 'max_temp' in request.args:
         user_weather_params.append('TMAX')
     if 'min_temp' in request.args:
@@ -760,7 +750,6 @@ def registercity():
                 present = True
                 break
 
-    # 4. Assignment 4 - Return admin_cities
     admin_cities = get_admin_cities(dbsession)
 
     if present:
@@ -772,7 +761,6 @@ def registercity():
             dbsession.add(usercity)
             dbsession.commit()
 
-        # Get the new city
         user_cities = get_user_cities(dbsession, user.id)
         return render_template('welcome.html',
                 welcome_message = "Personal Weather Portal",
@@ -797,67 +785,50 @@ def registercity():
                 status_style="display:block;")
 
 
-# 5. Assignment 5: 
-# - Connect the "login-using-google" form with this method
-# - For http methods list in the definition, use POST and GET
+# 5. Assignment 5: Wire up authorize() with @app.route; POST and GET methods
+@app.route('/authorize', methods=['POST', 'GET'])
 def authorize():
-  if not os.path.exists(CLIENT_SECRETS_FILE):
-      return render_template('google-oauth-client-secrets-file-missing.html')
+    if not os.path.exists(CLIENT_SECRETS_FILE):
+        return render_template('google-oauth-client-secrets-file-missing.html')
 
-  # Create flow instance to manage the OAuth 2.0 Authorization Grant Flow steps.
-  flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-      CLIENT_SECRETS_FILE, scopes=SCOPES)
+    flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
+        CLIENT_SECRETS_FILE, scopes=SCOPES)
 
-  # The URI created here must exactly match one of the authorized redirect URIs
-  # for the OAuth 2.0 client, which you configured in the API Console. If this
-  # value doesn't match an authorized URI, you will get a 'redirect_uri_mismatch'
-  # error.
-  redirect_uri = flask.url_for('oauth2callback', _external=True)
-  parts = redirect_uri.split("/oauth2callback")
-  print(parts)
-  if ":5009" not in redirect_uri:
-    flow.redirect_uri = parts[0] + ":5009/oauth2callback"
-  else:
-    flow.redirect_uri = redirect_uri
-  print(flow.redirect_uri)
+    redirect_uri = flask.url_for('oauth2callback', _external=True)
+    parts = redirect_uri.split("/oauth2callback")
+    print(parts)
+    if ":5009" not in redirect_uri:
+        flow.redirect_uri = parts[0] + ":5009/oauth2callback"
+    else:
+        flow.redirect_uri = redirect_uri
+    print(flow.redirect_uri)
 
-  authorization_url, state = flow.authorization_url(
-      # Enable offline access so that you can refresh an access token without
-      # re-prompting the user for permission. Recommended for web server apps.
-      access_type='offline',
-      # Enable incremental authorization. Recommended as a best practice.
-      include_granted_scopes='true')
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true')
 
-  # Store the state so the callback can verify the auth server response.
-  flask.session['state'] = state
-  print("Authorization URL:" + authorization_url)
+    flask.session['state'] = state
+    print("Authorization URL:" + authorization_url)
 
-  return flask.redirect(authorization_url)
+    return flask.redirect(authorization_url)
 
 
 @app.route('/oauth2callback')
 def oauth2callback():
-  # Specify the state when creating the flow in the callback so that it can
-  # verified in the authorization server response.
-  state = flask.session['state']
+    state = flask.session['state']
 
-  flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-      CLIENT_SECRETS_FILE, scopes=SCOPES, state=state)
-  flow.redirect_uri = flask.url_for('oauth2callback', _external=True)
+    flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
+        CLIENT_SECRETS_FILE, scopes=SCOPES, state=state)
+    flow.redirect_uri = flask.url_for('oauth2callback', _external=True)
 
-  # Use the authorization server's response to fetch the OAuth 2.0 tokens.
-  authorization_response = flask.request.url
-  print("Authorization response:" + authorization_response)
-  flow.fetch_token(authorization_response=authorization_response)
+    authorization_response = flask.request.url
+    print("Authorization response:" + authorization_response)
+    flow.fetch_token(authorization_response=authorization_response)
 
-  # Store credentials in the session.
-  # In a production app, you likely want to save these
-  # credentials in a persistent database instead.
-  credentials = flow.credentials
-  flask.session['credentials'] = credentials_to_dict(credentials)
+    credentials = flow.credentials
+    flask.session['credentials'] = credentials_to_dict(credentials)
 
-  return flask.redirect(flask.url_for('login'))
-
+    return flask.redirect(flask.url_for('login'))
 
 
 @app.route("/logout",methods=['GET'])
@@ -866,7 +837,6 @@ def logout():
     session.pop('username', None)
     app.logger.info("Before returning...")
 
-    # delete credentials from Flask session
     if 'credentials' in flask.session:
         credentials = google.oauth2.credentials.Credentials(**flask.session['credentials'])
 
@@ -892,20 +862,19 @@ def login():
     app.logger.info("Username:%s", username)
     app.logger.info("Password:%s", password)
 
-    # 5. Assignment 4 - Check if user is present
+    # Handle username/password login path
     if username != '':
         dbsession = DBSession()
         users = dbsession.query(User).filter_by(name=username)
         if users.count() == 0:
-            return render_template('not-found.html',user=username)
+            return render_template('not-found.html', user=username)
         else:
-            # 6. Assignment 5:
-            # - Check that <username, password> exists in the database
-            # - Note that password will be encrypted in the DB.
-            # - You will have to use bcrypt's checkpw method to check the password.
-            app.logger.info("TODO: Verify the user and password.")
+            # 6. Assignment 5: Verify password using bcrypt
+            user = users.first()
+            if user.password and not bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
+                return render_template('not-found.html', user=username)
 
-    # Load credentials from the session.
+    # Handle Google OAuth login path
     if 'credentials' in flask.session:
         credentials = google.oauth2.credentials.Credentials(
               **flask.session['credentials'])
@@ -914,9 +883,13 @@ def login():
         print("User email:" + user_email)
         username = user_email
 
-        # Assignment 5: 
-        # - Insert User in the DB
-        # - Leave password empty
+        # Assignment 5: Insert User in DB if not already present; leave password empty
+        dbsession = DBSession()
+        existing = dbsession.query(User).filter_by(name=username).first()
+        if existing is None:
+            new_user = User(name=username, password='')
+            dbsession.add(new_user)
+            dbsession.commit()
 
         flask.session['credentials'] = credentials_to_dict(credentials)
 
@@ -924,24 +897,18 @@ def login():
 
     dbsession = DBSession()
     users = dbsession.query(User).filter_by(name=username)
-
-    # 6. Assignment 4 - Return admin_cities
     admin_cities = get_admin_cities(dbsession)
 
-    runs = []
     user_cities = []
     if users.count() > 0:
         user = users.first()
         user_cities = get_user_cities(dbsession, user.id)
     else:
-        user = User(name=username, password=password)
-        dbsession = DBSession()
-        dbsession.add(user)
+        # Fallback: auto-create (covers edge cases)
+        new_user = User(name=username, password='')
+        dbsession.add(new_user)
         dbsession.commit()
 
-    my_cities = []
-    if username in in_mem_user_cities:
-        my_cities = in_mem_user_cities[username]
     return render_template('welcome.html',
             welcome_message = "Personal Weather Portal",
             cities=user_cities,
@@ -959,7 +926,6 @@ def index():
     return render_template('index.html')
 
 
-
 @app.route("/adminlogin", methods=['POST'])
 def adminlogin():
     username = request.form['username'].strip()
@@ -969,10 +935,13 @@ def adminlogin():
 
     session['username'] = username
 
+    dbsession = DBSession()
+    admin_cities = get_admin_cities(dbsession)
     user_cities = in_mem_cities
     return render_template('welcome.html',
             welcome_message = "Personal Weather Portal - Admin Panel",
             cities=user_cities,
+            available_cities=admin_cities,
             name=username,
             addButton_style="display:inline;",
             addCityForm_style="display:inline;",
