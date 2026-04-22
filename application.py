@@ -117,7 +117,8 @@ class Admin(Base):
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
-            fields[c.name] = getattr(self, c.name)
+            if c.name != 'password':
+                fields[c.name] = getattr(self, c.name)
         return fields
 
 
@@ -135,7 +136,8 @@ class User(Base):
     def as_dict(self):
         fields = {}
         for c in self.__table__.columns:
-            fields[c.name] = getattr(self, c.name)
+            if c.name != 'password':
+                fields[c.name] = getattr(self, c.name)
         return fields
 
 
