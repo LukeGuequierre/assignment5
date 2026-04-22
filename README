@@ -1,7 +1,7 @@
 name: Luke Guequierre
 eid: lkg746
 githubusername: LukeGuequierre
-app: 
+app: https://ec2-18-223-1-237.us-east-2.compute.amazonaws.com
 comments:
 
 WRF Web App
@@ -9,7 +9,7 @@ WRF Web App
 
 Run 
 ----
-1. python3 -m venv venv
+1. python3 -m  venv
 2. source venv/bin/activate
 3. For Google OAuth:
    - pip3 install --only-binary :all: greenlet
